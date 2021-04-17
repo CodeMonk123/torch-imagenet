@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-torch-imagenet
+  namespace: ddlp-torch
+  labels:
+    name: myapp
+spec:
+  volumes:
+    - name: image-net-vloume
+      hostPath:
+        path: /share/dataset/ILSVRC-2012-ImageNet/
+    - name: dshm
+      emptyDir:
+        medium: Memory
+
+  containers:
+  - name: myapp
+    image: registry.cn-hangzhou.aliyuncs.com/cuizihan/torch-imagent:latest
+    command: [ "/bin/bash", "-c", "--" ]
+    args: [ "while true; do sleep 30; done;" ]
+    imagePullPolicy: Always
+    volumeMounts:
+      - name: image-net-vloume
+        mountPath: /data
+      - name: dshm
+        mountPath: /dev/shm
+    resources:
+      limits:
+        memory: "2Gi"
+        cpu: "2"
+        nvidia.com/gpu: "1"
+      requests:
+        nvidia.com/gpu: "1"
+        cpu: "1"
+    
