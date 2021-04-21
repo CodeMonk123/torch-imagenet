@@ -4,3 +4,4 @@ WORKDIR /app
 
 COPY *.py /app/
 
+RUN  pip install scipy -i https://mirrors.nju.edu.cn/pypi/web/simple/

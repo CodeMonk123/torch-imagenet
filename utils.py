@@ -1,5 +1,6 @@
 import torch
-
+import os
+import json
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -40,6 +41,22 @@ class ProgressMeter(object):
         num_digits = len(str(num_batches // 1))
         fmt = '{:' + str(num_digits) + 'd}'
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+    
+
+class SpeedMerter(object):
+    def __init__(self) -> None:
+        pod_name = os.getenv('HOSTNAME')
+        ddlp_dir = os.getenv('DDLP_PATH')
+        self.speed_file_path = os.path.join(ddlp_dir, pod_name, 'speed.json')
+        self.speed = []
+    
+    def update(self, val):
+        self.speed.append(val)
+    
+    def output(self):
+        with open(self.speed_file_path, mode='w') as fp:
+            fp.write(str(self.speed))
+    
 
 
 def adjust_learning_rate(optimizer, epoch, args):

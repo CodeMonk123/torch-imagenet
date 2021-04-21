@@ -1,3 +1,5 @@
+from torch.utils.data import dataloader
+from torchvision.models.inception import inception_v3
 from inception_v4 import inceptionv4
 import torch
 import torch.distributed as dist
@@ -26,15 +28,15 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='alexnet',
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: alexnet)')
-parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=40, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
+parser.add_argument('-b', '--batch-size', default=64, type=int,
                     metavar='N',
-                    help='mini-batch size (default: 256), this is the total '
+                    help='mini-batch size (default: 64), this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
@@ -54,6 +56,7 @@ parser.add_argument('--dist-url', default='tcp://localhost:7890', type=str,
                     help='url used to set up distributed training') 
 parser.add_argument('-p', '--print-freq', default=5, type=int,
                     metavar='N', help='print frequency (default: 5)')
+parser.add_argument('--fast', action='store_true', help='if setted, run only 100 mini batches.' )
 
 
 best_acc1 = 0
@@ -103,10 +106,12 @@ def main_worker():
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])  
     
+    input_size = 224 if args.arch != 'inception_v3' else 299
+
     train_dataset = datasets.ImageFolder(
         traindir,
         transforms.Compose([
-            transforms.RandomResizedCrop(224),
+            transforms.RandomResizedCrop(input_size),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
@@ -126,7 +131,7 @@ def main_worker():
             valdir,
             transforms.Compose([
                 transforms.Resize(256),
-                transforms.CenterCrop(224),
+                transforms.CenterCrop(input_size),
                 transforms.ToTensor(),
                 normalize,
             ])
@@ -143,13 +148,39 @@ def main_worker():
     for epoch in range(args.start_epoch, args.epochs):
         train_sampler.set_epoch(epoch)
         adjust_learning_rate(optimizer=optimizer, epoch=epoch, args=args)
-        train(train_loader=train_loader, model=model, criterion=criterion, optimizer=optimizer, epoch=epoch, args=args)
-        acc1 = validate(val_loader=val_loader, model=model, criterion=criterion, args=args)
-        is_best = acc1 > best_acc1
-        best_acc1 = max(acc1, best_acc1)
+        if not args.fast:
+            train(train_loader=train_loader, model=model, criterion=criterion, optimizer=optimizer, epoch=epoch, args=args)
+        else:
+            fast_test(train_loader=train_loader, model=model, criterion=criterion, optimizer=optimizer, args=args)
+        # acc1 = validate(val_loader=val_loader, model=model, criterion=criterion, args=args)
+        # is_best = acc1 > best_acc1
+        # best_acc1 = max(acc1, best_acc1)
 
         ## TODO: save checkpoint
         
+
+def fast_test(train_loader, model, criterion, optimizer,  args):
+    speed_meter = SpeedMerter()
+    model.train()
+    end = time.time()
+    for i,(images, target) in enumerate(train_loader):
+        if i == 100:
+            break
+        images = images.cuda(0, non_blocking=True)
+        target = target.cuda(0, non_blocking=True)
+        output = model(images)
+        loss = criterion(output, target)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        elapsed_time = time.time() - end
+        speed = args.batch_size * dist.get_world_size() / elapsed_time
+        end = time.time()
+        speed_meter.update(speed)
+        if i % args.print_freq == 0:
+            print('batch[{}/100]: {} images/sec'.format(i, speed))
+    speed_meter.output()
+
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
@@ -192,11 +223,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         elapsed_time = time.time() - end
         batch_time.update(elapsed_time)
         end = time.time()
-
-        if i % args.print_freq == 0:
-            progress.display(i)
-        speed = args.batch_size * dist.get_world_size() / elapsed_time
-        print('{:.2f} images/s'.format(speed))
+        
 
 
 def validate(val_loader, model, criterion, args):
@@ -232,8 +259,7 @@ def validate(val_loader, model, criterion, args):
             batch_time.update(time.time() - end)
             end = time.time()
 
-            if i % args.print_freq == 0:
-                progress.display(i)
+            
 
         # TODO: this should also be done with the ProgressMeter
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
