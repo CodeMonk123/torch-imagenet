@@ -1,3 +1,4 @@
+from inception_v4 import inceptionv4
 import torch
 import torch.distributed as dist
 import argparse
@@ -15,7 +16,7 @@ import os
 from utils import *
 import time
 
-model_names = ['alexnet', 'inception_v3', 'resnet50', 'resnet152', 'vgg16'] # TODO: implement inception v4
+model_names = ['alexnet', 'inception_v3', 'resnet50', 'resnet152', 'vgg16', 'inception_v4'] # TODO: implement inception v4
 
 parser = argparse.ArgumentParser(description="Pytorch imagenet distributed training")
 parser.add_argument('data', metavar='DIR',
@@ -69,9 +70,14 @@ def join_process_group():
 
 
 def main_worker():
+    global best_acc1
     join_process_group()
     # create model 
-    model = models.__dict__[args.arch]()
+    if args.arch != 'inception_v4':
+        model = models.__dict__[args.arch]()
+    else:
+        model = inceptionv4(num_classes=1000, pretrained=None)
+    
     device = torch.device('cuda', 0) # Set reasonable CUDA_VISIBLE_DEVICES 
     model = model.to(device)
     # ddp
