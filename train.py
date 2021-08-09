@@ -17,19 +17,20 @@ import torchvision.models as models
 import os
 from utils import *
 import time
-import gc
 
 
-model_names = ['alexnet', 'inception_v3', 'resnet50', 'resnet152', 'vgg16', 'inception_v4'] # TODO: implement inception v4
+model_names = ['alexnet', 'inception_v3',
+               'resnet50', 'resnet152', 'vgg16', 'inception_v4']
 
-parser = argparse.ArgumentParser(description="Pytorch imagenet distributed training")
+parser = argparse.ArgumentParser(
+    description="Pytorch imagenet distributed training")
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='alexnet',
                     choices=model_names,
                     help='model architecture: ' +
-                        ' | '.join(model_names) +
-                        ' (default: alexnet)')
+                    ' | '.join(model_names) +
+                    ' (default: alexnet)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=1, type=int, metavar='N',
@@ -48,17 +49,16 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')
 parser.add_argument('--world-size', default=1, type=int,
-                    help='number of nodes for distributed training')   
+                    help='number of nodes for distributed training')
 parser.add_argument('--rank', default=0, type=int,
-                    help='node rank for distributed training')         
+                    help='node rank for distributed training')
 parser.add_argument('--dist-url', default='tcp://localhost:7890', type=str,
-                    help='url used to set up distributed training') 
+                    help='url used to set up distributed training')
 parser.add_argument('-p', '--print-freq', default=5, type=int,
                     metavar='N', help='print frequency (default: 5)')
-parser.add_argument('--fast', action='store_true', help='if setted, run only 100 mini batches.' )
+parser.add_argument('--fast', action='store_true',
+                    help='if setted, run only 100 mini batches.')
 
 
 best_acc1 = 0
@@ -68,16 +68,18 @@ args = parser.parse_args()
 def join_process_group():
     print('==> Join process group')
     if dist.is_available() and dist.is_nccl_available():
-        dist.init_process_group(backend='nccl',init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
+        dist.init_process_group(
+            backend='nccl', init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
         print('==> Process[{}] is ready.'.format(args.rank))
     else:
-        raise RuntimeError("Error: Pytorch distributed framework or NCCL is unavailable.")
+        raise RuntimeError(
+            "Error: Pytorch distributed framework or NCCL is unavailable.")
 
 
 def main_worker():
     global best_acc1
     join_process_group()
-    # create model 
+    # create model
     if args.arch != 'inception_v4':
         if args.arch != 'inception_v3':
             model = models.__dict__[args.arch]()
@@ -85,8 +87,8 @@ def main_worker():
             model = models.inception_v3(aux_logits=False)
     else:
         model = inceptionv4(num_classes=1000, pretrained=None)
-    
-    device = torch.device('cuda', 0) # Set reasonable CUDA_VISIBLE_DEVICES 
+
+    device = torch.device('cuda', 0)  # Set reasonable CUDA_VISIBLE_DEVICES
     model = model.to(device)
     # ddp
     model = nn.parallel.DistributedDataParallel(model)
@@ -96,11 +98,8 @@ def main_worker():
                                 weight_decay=args.weight_decay)
     # model size
     total_params = sum([torch.numel(p) for p in model.parameters()])
-    print('==> Model({}): {:.2f} MB'.format(args.arch, total_params * 4 / (1024 * 1024)))
-    
-    # optionally resume from a checkpoint
-    if args.resume:
-        pass # TODO
+    print('==> Model({}): {:.2f} MB'.format(
+        args.arch, total_params * 4 / (1024 * 1024)))
 
     cudnn.benchmark = True
 
@@ -109,8 +108,8 @@ def main_worker():
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])  
-    
+                                     std=[0.229, 0.224, 0.225])
+
     input_size = 224 if args.arch != 'inception_v3' else 299
 
     train_dataset = datasets.ImageFolder(
@@ -122,7 +121,8 @@ def main_worker():
             normalize,
         ])
     )
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(
+        train_dataset)
     train_loader = torch.utils.data.DataLoader(
         dataset=train_dataset,
         batch_size=args.batch_size,
@@ -154,43 +154,38 @@ def main_worker():
         train_sampler.set_epoch(epoch)
         adjust_learning_rate(optimizer=optimizer, epoch=epoch, args=args)
         if not args.fast:
-            train(train_loader=train_loader, model=model, criterion=criterion, optimizer=optimizer, epoch=epoch, args=args)
+            train(train_loader=train_loader, model=model, criterion=criterion,
+                  optimizer=optimizer, epoch=epoch, args=args)
         else:
-            fast_test(train_loader=train_loader, model=model, criterion=criterion, optimizer=optimizer, args=args)
-        # acc1 = validate(val_loader=val_loader, model=model, criterion=criterion, args=args)
-        # is_best = acc1 > best_acc1
-        # best_acc1 = max(acc1, best_acc1)
+            fast_test(train_loader=train_loader, model=model,
+                      criterion=criterion, optimizer=optimizer, args=args)
 
-        ## TODO: save checkpoint
-        
 
 def fast_test(train_loader, model, criterion, optimizer,  args):
-    speed_meter = SpeedMerter(is_master=(dist.get_rank()==0))
+    speed_meter = SpeedMerter(is_master=(dist.get_rank() == 0))
     model.train()
     start_time = time.time()
-    for i,(images, target) in enumerate(train_loader):
-        if i == 35:
+    for i, (images, target) in enumerate(train_loader):
+        if i == 50:
             break
         images = images.cuda(0, non_blocking=True)
         target = target.cuda(0, non_blocking=True)
-        
+
         output = model(images)
         loss = criterion(output, target)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        
-        
-        if (i+1) % 7 == 0:
+
+        if (i+1) % 10 == 0:
             end_time = time.time()
-            num_images = args.batch_size * dist.get_world_size() * 7
+            num_images = args.batch_size * 10
             speed = num_images / (end_time - start_time)
             speed_meter.update(val=speed)
-            print('[{}/35] {} imgs/s'.format(i+1, speed))
+            print('[{}/50] {} imgs/s'.format(i+1, speed))
             start_time = time.time()
     speed_meter.output()
-
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
@@ -233,7 +228,6 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         elapsed_time = time.time() - end
         batch_time.update(elapsed_time)
         end = time.time()
-        
 
 
 def validate(val_loader, model, criterion, args):
@@ -268,8 +262,6 @@ def validate(val_loader, model, criterion, args):
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
-
-            
 
         # TODO: this should also be done with the ProgressMeter
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
