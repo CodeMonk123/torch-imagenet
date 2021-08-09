@@ -44,18 +44,35 @@ class ProgressMeter(object):
     
 
 class SpeedMerter(object):
-    def __init__(self) -> None:
+    def __init__(self, is_master:bool) -> None:
+        self._is_master = is_master
+        if not is_master:
+            return
         pod_name = os.getenv('HOSTNAME')
-        ddlp_dir = os.getenv('DDLP_PATH')
-        self.speed_file_path = os.path.join(ddlp_dir, pod_name, 'speed.json')
+        self.job_config = os.getenv('JOB_CONFIG')
+        ddlp_dir = '/ddlp'
+        # ddlp_dir = '/home/czh/'
+        pod_dir = os.path.join(ddlp_dir, pod_name)
+        if not os.path.exists(pod_dir):
+            os.makedirs(pod_dir,exist_ok=True)
+
+        self.speed_file_path = os.path.join(pod_dir, 'speed.json')
+        self.config_file_path = os.path.join(pod_dir, 'config.json')
         self.speed = []
     
     def update(self, val):
-        self.speed.append(val)
+        if self._is_master:
+            self.speed.append(val)
     
     def output(self):
-        with open(self.speed_file_path, mode='w') as fp:
-            fp.write(str(self.speed))
+        if self._is_master:
+            with open(self.speed_file_path, mode='w') as fp:
+                fp.write(str(self.speed))
+            if self.job_config is not None:
+                with open(self.config_file_path, mode='w') as fp:
+                    fp.write(self.job_config)
+                    fp.write('\n')
+                
     
 
 

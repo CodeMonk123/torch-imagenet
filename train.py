@@ -17,6 +17,8 @@ import torchvision.models as models
 import os
 from utils import *
 import time
+import gc
+
 
 model_names = ['alexnet', 'inception_v3', 'resnet50', 'resnet152', 'vgg16', 'inception_v4'] # TODO: implement inception v4
 
@@ -30,7 +32,7 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='alexnet',
                         ' (default: alexnet)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=40, type=int, metavar='N',
+parser.add_argument('--epochs', default=1, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -77,7 +79,10 @@ def main_worker():
     join_process_group()
     # create model 
     if args.arch != 'inception_v4':
-        model = models.__dict__[args.arch]()
+        if args.arch != 'inception_v3':
+            model = models.__dict__[args.arch]()
+        else:
+            model = models.inception_v3(aux_logits=False)
     else:
         model = inceptionv4(num_classes=1000, pretrained=None)
     
@@ -160,25 +165,30 @@ def main_worker():
         
 
 def fast_test(train_loader, model, criterion, optimizer,  args):
-    speed_meter = SpeedMerter()
+    speed_meter = SpeedMerter(is_master=(dist.get_rank()==0))
     model.train()
-    end = time.time()
+    start_time = time.time()
     for i,(images, target) in enumerate(train_loader):
-        if i == 100:
+        if i == 35:
             break
         images = images.cuda(0, non_blocking=True)
         target = target.cuda(0, non_blocking=True)
+        
         output = model(images)
         loss = criterion(output, target)
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        elapsed_time = time.time() - end
-        speed = args.batch_size * dist.get_world_size() / elapsed_time
-        end = time.time()
-        speed_meter.update(speed)
-        if i % args.print_freq == 0:
-            print('batch[{}/100]: {} images/sec'.format(i, speed))
+        
+        
+        if (i+1) % 7 == 0:
+            end_time = time.time()
+            num_images = args.batch_size * dist.get_world_size() * 7
+            speed = num_images / (end_time - start_time)
+            speed_meter.update(val=speed)
+            print('[{}/35] {} imgs/s'.format(i+1, speed))
+            start_time = time.time()
     speed_meter.output()
 
 
@@ -269,4 +279,5 @@ def validate(val_loader, model, criterion, args):
 
 
 if __name__ == '__main__':
+    torch.cuda.empty_cache()
     main_worker()
